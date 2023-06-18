@@ -37,7 +37,7 @@ class LudwigJob():
         '''
         # Parameter         
         if experiment_name is None:
-            experiment_name = 'ex'
+            experiment_name = 'model'
         self.experiment_name = experiment_name
         self.verbose = verbose        
 
@@ -110,7 +110,7 @@ class LudwigJob():
         results_dir = os.listdir('results')
         self.output_dirs = [ 'results/' + d                for d in results_dir ]
         self.train_jobs  = [ int(d.split('_')[1])          for d in results_dir ]
-        self.model_names = [ 'model_' + str(j)             for j in self.train_jobs ]    
+        self.model_names = [ self.experiment_name + '_' + str(j)             for j in self.train_jobs ]    
         self.model_paths = [d + '/model'                   for d in self.output_dirs]
         
         train_stats = [ d + '/training_statistics.json'    for d in self.output_dirs ]
@@ -184,19 +184,27 @@ class LudwigJob():
 # experiment
 #
     
-    def experiment(self, train_jobs, dataset):
+    def experiment(self, dataset, train_jobs=None, count_runs=[0] ):
         '''
         train and evaluate a list of Ludwig models
         '''
+        
+        # counts calls of this function
+        count_runs[0]+=1  
+        
+        if train_jobs is None:
+            train_jobs = [ no for (no, _) in enumerate(self.configs)]        
         self.train_jobs = train_jobs
-        self.model_names = ['model_' + str(c) for c in train_jobs]
+        self.model_names = [self.experiment_name + '_' + str(config_no) for config_no in train_jobs]
         
         
         for config_no in train_jobs:
-            experiment_subname = self.experiment_name + '_' + str(config_no) 
-            experiment_path = 'results/' + experiment_subname + '_run'  
+            self.model_name          = self.model_names[config_no]
+            self.model_no            = config_no
+            
+            experiment_path = 'results/' + self.model_name + '_run'  
             print()
-            print( 'Training config_no {} >> {}'.format( config_no, experiment_path) )   
+            print( 'Training model {}'.format(self.model_name) )   
             
             # Zielverzeichnis rekursiv löschen
             try:
@@ -208,14 +216,15 @@ class LudwigJob():
 
             # lade model
             self.model               = LudwigModel(config=self.configs[config_no], logging_level=logging_level)   
-            self.model_no            = config_no
+
+            
             self.cuda                = torch.cuda.is_available()
             self.output_feature_name = self.model.config['output_features'][0]['name']
             self.output_feature_type = self.model.config['output_features'][0]['type']
 
             # trainiere
             start_time = time.time()     
-            test_stat, train_stat, _, output_dir = self.model.experiment( dataset=dataset, experiment_name=experiment_subname)
+            test_stat, train_stat, _, output_dir = self.model.experiment( dataset=dataset, experiment_name=self.model_name)
             self.test_stats  += [test_stat]
             self.train_stats += [train_stat]
             self.output_dirs += [output_dir]
@@ -227,23 +236,24 @@ class LudwigJob():
             epochs            = len(train_stat.test['combined']['loss']) 
             validation_metric = self.model.config['trainer']['validation_metric']
             log = pak.dataframe([
-                [ config_no, 'train_secs',          train_secs        ],
-                [ config_no, 'train_time',          train_time        ],
-                [ config_no, 'epochs',              epochs            ],
-                [ config_no, 'time/epoch',          bpy.human_readable_seconds( train_secs/epochs ) ],     
-                [ config_no, 'validation_metric',   validation_metric ],     
-                [ config_no, 'experiment_path',     experiment_path   ], 
-                [ config_no, 'output_feature_name', self.output_feature_name   ],    
-                [ config_no, 'output_feature_type', self.output_feature_type   ],                    
+                [ count_runs[0], self.model_name, 'train_secs',          train_secs        ],
+                [ count_runs[0], self.model_name, 'train_time',          train_time        ],
+                [ count_runs[0], self.model_name, 'epochs',              epochs            ],
+                [ count_runs[0], self.model_name, 'time/epoch',          bpy.human_readable_seconds( train_secs/epochs ) ],     
+                [ count_runs[0], self.model_name, 'validation_metric',   validation_metric ],     
+                [ count_runs[0], self.model_name, 'experiment_path',     experiment_path   ], 
+                [ count_runs[0], self.model_name, 'output_feature_name', self.output_feature_name   ],    
+                [ count_runs[0], self.model_name, 'output_feature_type', self.output_feature_type   ],                    
                 
             ])
-            log.columns = ['config_no','name','value']
-            self.train_log_raw = pak.add_rows( self.train_log_raw, log ) 
+            log.columns = ['run','model_name','name','value']
+            log2 = analyse_test_stat( count_runs[0], self.model_name, test_stat)
+            self.train_log_raw = pak.add_rows( self.train_log_raw, log  )             
+            self.train_log_raw = pak.add_rows( self.train_log_raw, log2 ) 
+            
             print('train_time:',train_time) 
             print()
-
-        # logge Gesamtprozess
-        self.train_log_raw = pak.add_rows( self.train_log_raw, entwirre_test_stat(self.test_stats))            
+       
 
 
 
@@ -291,8 +301,11 @@ class LudwigJob():
     def train_log_to_csv(self):
         '''
         Saves train_log_big to csv file
+        Saves train_log_raw to csv file
         Shows train_log (small version)
         '''
+        self.train_log_raw.to_csv('train_log_raw.csv', index=False) 
+        
         t = self.train_log_big()
         if self.in_colab:
             t.to_csv('train_log_colab.csv', index=False)

@@ -1,4 +1,4 @@
-import importlib, yaml, pkg_resources, os, warnings
+import importlib, yaml, pkg_resources, os, warnings, re
 import torch 
 import bpyth as bpy
 import pandas as pd
@@ -26,19 +26,34 @@ def gpu_info():
 
 
 
-def entwirre_test_stat(test_stats):
+#def entwirre_test_stat(test_stats):
+#    result = []
+#    for config_no, test_stat in enumerate(test_stats):
+#        print(config_no)
+#        for output_feature_name, stat in test_stat.items():
+#            if output_feature_name == 'combined':
+#                continue
+#            for key, value in stat.items():
+#                if isinstance(value, (int, float)):
+#                    result += [[config_no, key, bpy.human_readable_number(value,3) ]]    
+#                    
+#    result = pak.dataframe(result)
+#    result.columns = ['config_no','name','value']
+#    return result
+#
+
+
+def analyse_test_stat(run, model_name, test_stat):
     result = []
-    for config_no, test_stat in enumerate(test_stats):
-        print(config_no)
-        for output_feature_name, stat in test_stat.items():
-            if output_feature_name == 'combined':
-                continue
-            for key, value in stat.items():
-                if isinstance(value, (int, float)):
-                    result += [[config_no, key, bpy.human_readable_number(value,3) ]]    
+    for output_feature_name, stat in test_stat.items():
+        if output_feature_name == 'combined':
+            continue
+        for key, value in stat.items():
+            if isinstance(value, (int, float)):
+                result += [[run, model_name, key, bpy.human_readable_number(value,3) ]]    
                     
     result = pak.dataframe(result)
-    result.columns = ['config_no','name','value']
+    result.columns = ['run','model_name','name','value']
     return result
 
 
@@ -48,9 +63,9 @@ def prepare_train_log(train_log_raw, size='small'):
 
     result = pd.pivot_table( train_log_raw, 
                               index='name',
-                              columns='config_no',
+                              columns='model_name',
                               values='value', 
-                              aggfunc='first')
+                              aggfunc='last')
     result = pak.drop_multiindex(result).reset_index() 
     
     # Namen korrigieren
@@ -94,42 +109,7 @@ def prepare_train_log(train_log_raw, size='small'):
 
 
 
-def list_datasets():
 
-    datasets = [
-#                                                       
-#        dataset_name                    input_field_types   output_field_type    
-#                                    size                                  note
-        ['adult_census_income',      4,  'category, number', 'binary',     'many category fields'], 
-        ['agnews',                   5,  'text',             'category',   ''   ],
-        ['amazon_review_polarity',   6,  'text',             'binary',     '',  ],
-        ['amazon_reviews',           6,  'text',             'category',   '',  ],
-        ['dbpedia',                  5,  'text',             'category',   '',  ],
-        ['electricity',              4,  'number',           'number',     '',  ],
-        ['ethos_binary',             2,  'text',             'binary',     '',  ],
-        ['flickr8k',                 3,  'image',            'text',       '',  ],
-        ['goemotions',               4,  'text',             'category',   '',  ],
-        ['irony',                    3,  'text',             'binary',     '',  ],
-        ['mnist',                    4,  'image',            'category',   'Hello world',  ],
-        ['mushroom_edibility',       3,  'category',         'binary',     '',  ],
-        ['poker_hand',               6,  'category',         'category',   '',  ],
-        ['sarcos',                   4,  'number',           'number',     '',  ],
-        ['sst2',                     3,  'text',             'binary',     '',  ],
-        ['sst3',                     4,  'text',             'category',   '',  ],        
-        ['sst4',                     4,  'text',             'category',   '',  ],       
-        ['yahoo_answers',            6,  'text',             'category',   '',  ],
-        ['yelp_review_polarity',     5,  'text',             'binary',     '',  ],
-        ['yelp_reviews',             5,  'text',             'category',   '',  ],
-        ['yosemite',                 4,  'time',             'number',     '',  ],
-        ['ae_price_prediction',      4,  'category',         'number',     '',  ],     
-        ['bookprice_prediction',     3,  'text,category',    'number',     '',  ],    
-
-
-        
-        ]
-    result = pak.dataframe(datasets)
-    result.columns = ['dataset_name','size','input_field_types','output_field_type','note',]
-    return result
 
 
 
@@ -217,19 +197,28 @@ def analyse_cols(data_df, dataset_loader=None, output_features_size=1):
     mask2 = analyse.feature_type == ''
     mask = mask1 & mask2
     analyse.loc[mask,'feature_type'] = 'number'
-
+    
+    # vector feature_type
+    pattern = r'^\s*(\d+(\.\d+)?\s*)+$'
+    mask1 = analyse['datatype_identified'].isin(['string'])
+    mask2 = analyse['vmin'].str.match(pattern)
+    mask3 = analyse['vmax'].str.match(pattern)
+    mask4 = analyse.feature_type == ''
+    mask = mask1  &  mask2  &  mask3  &  mask4
+    analyse.loc[mask,'feature_type'] = 'vector'
+    
     # text feature_type
     mask1 = analyse['datatype_identified'].isin(['string'])
     mask2 = analyse.feature_type == ''
     mask = mask1 & mask2
     analyse.loc[mask,'feature_type'] = 'text'
 
-    
     # image feature_type  
     try:
         mask1 = analyse['feature_type'] == 'text'
         mask2 = analyse['vmin'].str.endswith(('jpg','png'))
-        mask = mask1 & mask2
+        mask3 = analyse['vmin'].str.endswith(('jpg','png'))        
+        mask = mask1  &  mask2  &  mask3
         analyse.loc[mask,'feature_type'] = 'image'
     except:
         pass
@@ -305,66 +294,88 @@ def config1(dataset_loader, use_yaml=True):
     return result    
 
 
+def configs(data_df, dataset_loader=None, output_features_size=1, use_yaml=True):
+    '''
+    List of config0, config1
+    '''
+    c0 = config0(data_df, dataset_loader=dataset_loader, output_features_size=output_features_size, use_yaml=use_yaml)
+    if dataset_loader is not None:
+        c1 = config1(dataset_loader,use_yaml=use_yaml)
+    if dataset_loader is None or c1 is None or c1 == '':
+        return [c0]
+    else:
+        return [c0,c1]
+
+
 
 def get_datasets(remove_failed=True):
     '''
     List all datasets available in Ludwig.
     '''
-    library_location = pkg_resources.get_distribution('ludwig').location
-    directory_within_library = 'ludwig/datasets/configs'
-    directory_path = os.path.join(library_location, directory_within_library)
-    file_list = os.listdir(directory_path)
+    try:
+        library_location = pkg_resources.get_distribution('ludwig').location
+        directory_within_library = 'ludwig/datasets/configs'
+        directory_path = os.path.join(library_location, directory_within_library)
+        file_list = os.listdir(directory_path)
     
-    elements_to_remove = ['__pycache__','__init__.py']
-    result = [x.replace('.yaml','') for x in file_list if x not in elements_to_remove]
-    result = sorted(result)
-
-    if not remove_failed:
-        return result
-
-    failed =    ['allstate_claims_severity',
-                 'amazon_employee_access_challenge',
-                 'ames_housing',
-                 'bbcnews',
-                 'bnp_claims_management',
-                 'connect4',
-                 'creditcard_fraud',
-                 'customer_churn_prediction',
-                 'higgs',
-                 'ieee_fraud',
-                 'imbalanced_insurance',
-                 'imdb',
-                 'insurance_lite',
-                 'jigsaw_unintended_bias100k',
-                 'mercedes_benz_greener',
-                 'noshow_appointments',
-                 'numerai28pt6',
-                 'ohsumed_7400',
-                 'otto_group_product',
-                 'porto_seguro_safe_driver',
-                 'reuters_r8',
-                 'rossman_store_sales',
-                 'santander_customer_satisfaction',
-                 'santander_customer_transaction',
-                 'santander_value_prediction',
-                 'sarcastic_headlines',
-                 'synthetic_fraud',
-                 'talkingdata_adtrack_fraud',
-                 'telco_customer_churn',
-                 'temperature',
-                 'titanic',
-                 'twitter_bots',
-                 'walmart_recruiting',
-                 'wmt15',
-                 'fever',
-                 'forest_cover',
-                 'google_quest_qa',
-                 'imdb_genre_prediction',
-                 'kdd_appetency',
-                 'kdd_churn',
-                 'kdd_upselling']    
-
-    result = [x for x in result if x not in failed]
+        elements_to_remove = ['__pycache__','__init__.py']
+        result = [x.replace('.yaml','') for x in file_list if x not in elements_to_remove]
+        result = sorted(result)
+    
+        if not remove_failed:
+            return result
+    
+        failed =    ['allstate_claims_severity',
+                     'amazon_employee_access_challenge',
+                     'ames_housing',
+                     'bbcnews',
+                     'bnp_claims_management',
+                     'connect4',
+                     'creditcard_fraud',
+                     'customer_churn_prediction',
+                     'higgs',
+                     'ieee_fraud',
+                     'imbalanced_insurance',
+                     'imdb',
+                     'insurance_lite',
+                     'jigsaw_unintended_bias100k',
+                     'mercedes_benz_greener',
+                     'noshow_appointments',
+                     'numerai28pt6',
+                     'ohsumed_7400',
+                     'otto_group_product',
+                     'porto_seguro_safe_driver',
+                     'reuters_r8',
+                     'rossman_store_sales',
+                     'santander_customer_satisfaction',
+                     'santander_customer_transaction',
+                     'santander_value_prediction',
+                     'sarcastic_headlines',
+                     'synthetic_fraud',
+                     'talkingdata_adtrack_fraud',
+                     'telco_customer_churn',
+                     'temperature',
+                     'titanic',
+                     'twitter_bots',
+                     'walmart_recruiting',
+                     'wmt15',
+                     'fever',
+                     'forest_cover',
+                     'google_quest_qa',
+                     'imdb_genre_prediction',
+                     'kdd_appetency',
+                     'kdd_churn',
+                     'kdd_upselling']    
+    
+        result = [x for x in result if x not in failed]
+    except:
+        print('Error, using static list')
+        # Error in Colab
+        result = ['iris','ethos_binary','irony','reuters_cmu','ohsumed_cmu','google_qa_question_type_reason_explanation','google_qa_answer_type_reason_explanation',
+                  'bookprice_prediction','product_sentiment_machine_hack','flickr8k','mushroom_edibility','sst2','goodbooks_books','sst3','sst5','naval','jc_penney_products',
+                  'fake_job_postings2','electricity','yosemite','data_scientist_salary','melbourne_airbnb','women_clothing_review','news_channel','ae_price_prediction',
+                  'news_popularity2','protein','california_house_price','adult_census_income','sarcos','goemotions','mnist','wine_reviews','kick_starter_funding','mercari_price_suggestion100K',
+                  'agnews','yelp_review_polarity','dbpedia','yelp_reviews','poker_hand']      
     return result
 
 
@@ -400,8 +411,6 @@ def scan_datasets(dataset_names, get_elements_to_remove=False):
         # Ausgabewerte berechnen
         input_features_type  = ', '.join(pak.group_and_agg( input_features,  ['feature_type','mem_usage'], ['','sum']).sort_values('mem_usage_sum', ascending=False).feature_type)
         output_features_type = ', '.join(pak.group_and_agg( output_features, ['feature_type','mem_usage'], ['','sum']).sort_values('mem_usage_sum', ascending=False).feature_type)        
-        config1 = yaml.dump(dataset_loader.default_model_config)
-        config1 = config1.replace('null\n...\n','')
 
         # Ausgabe
         result += [{'dataset_name': dataset, 

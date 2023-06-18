@@ -1,0 +1,53 @@
+run,model_name,name,value
+1,mnist_0,train_secs,110
+1,mnist_0,train_time,"1 min, 50 secs"
+1,mnist_0,epochs,44
+1,mnist_0,time/epoch,2.5 secs
+1,mnist_0,validation_metric,accuracy
+1,mnist_0,experiment_path,results/mnist_0_run
+1,mnist_0,output_feature_name,label
+1,mnist_0,output_feature_type,category
+1,mnist_0,loss,0.0505
+1,mnist_0,roc_auc,1.0
+1,mnist_0,accuracy,0.985
+1,mnist_0,accuracy_micro,0.985
+1,mnist_0,hits_at_k,0.999
+1,mnist_1,train_secs,25
+1,mnist_1,train_time,25 secs
+1,mnist_1,epochs,73
+1,mnist_1,time/epoch,0.3 secs
+1,mnist_1,validation_metric,accuracy
+1,mnist_1,experiment_path,results/mnist_1_run
+1,mnist_1,output_feature_name,label
+1,mnist_1,output_feature_type,category
+1,mnist_1,loss,0.0963
+1,mnist_1,roc_auc,0.999
+1,mnist_1,accuracy,0.971
+1,mnist_1,accuracy_micro,0.971
+1,mnist_1,hits_at_k,0.996
+1,mnist_2,train_secs,48
+1,mnist_2,train_time,48 secs
+1,mnist_2,epochs,10
+1,mnist_2,time/epoch,4.8 secs
+1,mnist_2,validation_metric,accuracy
+1,mnist_2,experiment_path,results/mnist_2_run
+1,mnist_2,output_feature_name,label
+1,mnist_2,output_feature_type,category
+1,mnist_2,loss,0.0695
+1,mnist_2,roc_auc,1.0
+1,mnist_2,accuracy,0.983
+1,mnist_2,accuracy_micro,0.984
+1,mnist_2,hits_at_k,0.998
+1,mnist_3,train_secs,46
+1,mnist_3,train_time,46 secs
+1,mnist_3,epochs,10
+1,mnist_3,time/epoch,4.6 secs
+1,mnist_3,validation_metric,accuracy
+1,mnist_3,experiment_path,results/mnist_3_run
+1,mnist_3,output_feature_name,label
+1,mnist_3,output_feature_type,category
+1,mnist_3,loss,0.19
+1,mnist_3,roc_auc,0.997
+1,mnist_3,accuracy,0.944
+1,mnist_3,accuracy_micro,0.944
+1,mnist_3,hits_at_k,0.991
