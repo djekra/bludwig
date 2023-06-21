@@ -3,7 +3,7 @@
 
 [project]
 name            = "bludwig"
-version         = "0.0.5"        
+version         = "0.0.6"        
 
 requires-python = ">=3.9"
 dependencies    = ['pandasklar','munch']

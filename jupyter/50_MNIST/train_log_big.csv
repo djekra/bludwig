@@ -1,0 +1,14 @@
+name,mnist_0,mnist_1,mnist_2,mnist_3
+validation_metric,accuracy,accuracy,accuracy,accuracy
+accuracy,0.981,0.971,0.953,0.976
+accuracy_micro,0.981,0.971,0.953,0.976
+hits_at_k,0.998,0.996,0.993,0.997
+loss,0.0582,0.0963,0.205,0.0828
+roc_auc,1.0,0.999,0.998,0.999
+experiment_path,results/mnist_0_run,results/mnist_1_run,results/mnist_2_run,results/mnist_3_run
+output_feature_type,category,category,category,category
+output_feature_name,label,label,label,label
+epochs,37,73,10,10
+train_secs,97,25,46,48
+time/epoch,2.6 secs,0.3 secs,4.6 secs,4.8 secs
+train_time,"1 min, 37 secs",25 secs,46 secs,48 secs

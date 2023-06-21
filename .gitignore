@@ -184,6 +184,7 @@ nb_out
 
 
 # Local project
+jupyter_privat
 results
 *.meta.json
 *.hdf5

@@ -1,0 +1,13 @@
+name,iris_0
+validation_metric,accuracy
+accuracy,0.703
+accuracy_micro,0.633
+loss,1.02
+roc_auc,0.71
+experiment_path,results/iris_0_run
+output_feature_type,category
+output_feature_name,class
+epochs,6
+train_secs,2
+time/epoch,0.3 secs
+train_time,2 secs

@@ -1,4 +1,4 @@
-import importlib, yaml, pkg_resources, os, warnings, re
+import importlib, yaml, pkg_resources, os, warnings, re, requests
 import torch 
 import bpyth as bpy
 import pandas as pd
@@ -59,55 +59,6 @@ def analyse_test_stat(run, model_name, test_stat):
 
 
 
-def prepare_train_log(train_log_raw, size='small'):
-
-    result = pd.pivot_table( train_log_raw, 
-                              index='name',
-                              columns='model_name',
-                              values='value', 
-                              aggfunc='last')
-    result = pak.drop_multiindex(result).reset_index() 
-    
-    # Namen korrigieren
-    mask = result.name.str.startswith('average')
-    result.loc[mask,'name'] = result[mask].name.str.replace('average_','') + '_avg'   
-
-    # validation_metric ganz nach vorne
-    mask = result.name == 'validation_metric'
-    zeilen_ganzvorne = list(set(result[mask].iloc[0]))    
-    #print(zeilen_ganzvorne)
-
-
-    # Zeilen sortieren
-    if size == 'small':
-        zeilen_vorne =  ['accuracy','recall','specificity','precision','roc_auc','loss',]
-        zeilen_hinten = ['epochs','time/epoch','train_time',]    
-        result = result.set_index('name').T
-        result = pak.move_cols( result, zeilen_vorne )
-        result = pak.move_cols( result, zeilen_ganzvorne )        
-        result = pak.move_cols( result, zeilen_hinten, -1 )    
-        result = result.T.reset_index()
-
-        # Zeilen löschen
-        zeilen_verboten = ['validation_metric']
-        zeilen_erlaubt = [z for z in (zeilen_ganzvorne + zeilen_vorne + zeilen_hinten) if not z in zeilen_verboten ]
-        mask = result.name.isin( zeilen_erlaubt )
-        result = result[mask]
-        
-    else: # size == 'big'
-        result = result.sort_values('name')
-        zeilen_vorne =  ['validation_metric',]
-        zeilen_hinten = ['experiment_path','output_feature_type','output_feature_name','epochs','train_secs','time/epoch','train_time',]     
-        result = result.set_index('name').T
-        result = pak.move_cols( result, zeilen_vorne )         
-        result = pak.move_cols( result, zeilen_hinten, -1 )    
-        result = result.T.reset_index()        
-
-    result = pak.reset_index(result)
-    result.columns = [c if isinstance(c,str) else 'model_' + str(c) for c in result.columns ]
-    return result
-
-
 
 
 
@@ -127,9 +78,12 @@ def load_dataset(dataset_name, verbose=True):
     #mask = katalog.dataset_name == dataset_name
     #katalogeintrag = katalog[mask].iloc[0]
 
-    output_feature_names = [col['name'] for col in dataset_loader.config.output_features]   
+    # nacharbeiten
     if dataset_name == 'agnews':
-        output_feature_names = ['class']
+        dataset_loader.config.output_features = [{'name': 'class', 'type': 'category'}]
+        data_df = pak.drop_cols( data_df,'class_index' )
+    
+    output_feature_names = [col['name'] for col in dataset_loader.config.output_features]   
     data_df = pak.move_cols(data_df, output_feature_names)     
     data_df = pak.move_cols(data_df, 'split',-1) 
     data_df = pak.drop_cols(data_df,['Unnamed: 0','Unnamed: 1'])
@@ -199,13 +153,16 @@ def analyse_cols(data_df, dataset_loader=None, output_features_size=1):
     analyse.loc[mask,'feature_type'] = 'number'
     
     # vector feature_type
-    pattern = r'^\s*(\d+(\.\d+)?\s*)+$'
-    mask1 = analyse['datatype_identified'].isin(['string'])
-    mask2 = analyse['vmin'].str.match(pattern)
-    mask3 = analyse['vmax'].str.match(pattern)
-    mask4 = analyse.feature_type == ''
-    mask = mask1  &  mask2  &  mask3  &  mask4
-    analyse.loc[mask,'feature_type'] = 'vector'
+    try:
+        pattern = r'^\s*(\d+(\.\d+)?\s*)+$'
+        mask1 = analyse['datatype_identified'].isin(['string'])
+        mask2 = analyse['vmin'].str.match(pattern)
+        mask3 = analyse['vmax'].str.match(pattern)
+        mask4 = analyse.feature_type == ''
+        mask = mask1  &  mask2  &  mask3  &  mask4
+        analyse.loc[mask,'feature_type'] = 'vector'
+    except:
+        pass
     
     # text feature_type
     mask1 = analyse['datatype_identified'].isin(['string'])
@@ -308,85 +265,54 @@ def configs(data_df, dataset_loader=None, output_features_size=1, use_yaml=True)
 
 
 
-def get_datasets(remove_failed=True):
-    '''
-    List all datasets available in Ludwig.
-    '''
-    try:
-        library_location = pkg_resources.get_distribution('ludwig').location
-        directory_within_library = 'ludwig/datasets/configs'
-        directory_path = os.path.join(library_location, directory_within_library)
-        file_list = os.listdir(directory_path)
-    
-        elements_to_remove = ['__pycache__','__init__.py']
-        result = [x.replace('.yaml','') for x in file_list if x not in elements_to_remove]
-        result = sorted(result)
-    
-        if not remove_failed:
-            return result
-    
-        failed =    ['allstate_claims_severity',
-                     'amazon_employee_access_challenge',
-                     'ames_housing',
-                     'bbcnews',
-                     'bnp_claims_management',
-                     'connect4',
-                     'creditcard_fraud',
-                     'customer_churn_prediction',
-                     'higgs',
-                     'ieee_fraud',
-                     'imbalanced_insurance',
-                     'imdb',
-                     'insurance_lite',
-                     'jigsaw_unintended_bias100k',
-                     'mercedes_benz_greener',
-                     'noshow_appointments',
-                     'numerai28pt6',
-                     'ohsumed_7400',
-                     'otto_group_product',
-                     'porto_seguro_safe_driver',
-                     'reuters_r8',
-                     'rossman_store_sales',
-                     'santander_customer_satisfaction',
-                     'santander_customer_transaction',
-                     'santander_value_prediction',
-                     'sarcastic_headlines',
-                     'synthetic_fraud',
-                     'talkingdata_adtrack_fraud',
-                     'telco_customer_churn',
-                     'temperature',
-                     'titanic',
-                     'twitter_bots',
-                     'walmart_recruiting',
-                     'wmt15',
-                     'fever',
-                     'forest_cover',
-                     'google_quest_qa',
-                     'imdb_genre_prediction',
-                     'kdd_appetency',
-                     'kdd_churn',
-                     'kdd_upselling']    
-    
-        result = [x for x in result if x not in failed]
-    except:
-        print('Error, using static list')
-        # Error in Colab
-        result = ['iris','ethos_binary','irony','reuters_cmu','ohsumed_cmu','google_qa_question_type_reason_explanation','google_qa_answer_type_reason_explanation',
-                  'bookprice_prediction','product_sentiment_machine_hack','flickr8k','mushroom_edibility','sst2','goodbooks_books','sst3','sst5','naval','jc_penney_products',
-                  'fake_job_postings2','electricity','yosemite','data_scientist_salary','melbourne_airbnb','women_clothing_review','news_channel','ae_price_prediction',
-                  'news_popularity2','protein','california_house_price','adult_census_income','sarcos','goemotions','mnist','wine_reviews','kick_starter_funding','mercari_price_suggestion100K',
-                  'agnews','yelp_review_polarity','dbpedia','yelp_reviews','poker_hand']      
-    return result
+#def list_datasets():
+#    '''
+#    List all datasets available in Ludwig.
+#    '''
+#    def get_filelist(use_github=False):
+#        if use_github:
+#            repository_url = 'https://api.github.com/repos/ludwig-ai/ludwig/contents/ludwig/datasets/configs'
+#            response = requests.get(repository_url)
+#            directory_contents = response.json()
+#            file_list = [item['name'] for item in directory_contents]  
+#            return file_list
+#        else:
+#            library_location = pkg_resources.get_distribution('ludwig').location
+#            directory_within_library = 'ludwig/datasets/configs'
+#            directory_path = os.path.join(library_location, directory_within_library)
+#            file_list = os.listdir(directory_path)       
+#            return file_list            
+#    try:
+#        file_list = get_filelist(use_github=False)
+#    except:
+#        file_list = get_filelist(use_github=True)  
+#        print('using github')
+#    elements_to_remove = ['__pycache__','__init__.py']
+#    result = [x.replace('.yaml','') for x in file_list if x not in elements_to_remove]
+#    result = sorted(result)
+#
+#    return result
 
 
 
 
 
-def scan_datasets(dataset_names, get_elements_to_remove=False):
+
+
+def scan_datasets( dataset_names, use_cache=False ):
     '''
     Scan and analyse Ludwig's database zoo. 
     '''
+    pickle_filename = 'scan_datasets.temp.pickle'
+    if use_cache:
+        try:
+            return pak.load_pickle(pickle_filename)   
+        except:
+            print('cache error')
+            return scan_datasets( dataset_names, use_cache=False )
+        
     result = []
+    
     for dataset in dataset_names:
         
         # load_dataset
@@ -395,50 +321,162 @@ def scan_datasets(dataset_names, get_elements_to_remove=False):
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")            
                 data_df, dataset_loader = load_dataset(dataset, verbose=False)  
-        except:
-            elements_to_remove += [dataset]
 
-        # analysieren 
-        analyse = analyse_cols(data_df, dataset_loader) 
-        mask = analyse.is_output_feature
-        output_features_size = analyse[mask].shape[0]        
-
-        # output_features and input_features 
-        spalten = ['col_name','feature_type','mem_usage']
-        output_features = analyse[:output_features_size][spalten]           
-        input_features = analyse[output_features_size:][spalten]        
-
-        # Ausgabewerte berechnen
-        input_features_type  = ', '.join(pak.group_and_agg( input_features,  ['feature_type','mem_usage'], ['','sum']).sort_values('mem_usage_sum', ascending=False).feature_type)
-        output_features_type = ', '.join(pak.group_and_agg( output_features, ['feature_type','mem_usage'], ['','sum']).sort_values('mem_usage_sum', ascending=False).feature_type)        
-
-        # Ausgabe
-        result += [{'dataset_name': dataset, 
-                    'rows': bpy.human_readable_number(data_df.shape[0]) ,
-                    'in_size'  : input_features.shape[0],                        
-                    'out_size' : output_features.shape[0],
-
-                    'in_name'  : ', '.join(input_features.col_name),                    
-                    'out_name' : ', '.join(output_features.col_name),                    
-
-                    'in_type'  : input_features_type,  # ', '.join(input_features.feature_type),                      
-                    'out_type' : output_features_type, # ', '.join(output_features.feature_type),                    
-                                 
-                    'description': dataset_loader.description(),
-                    'config1': config1(dataset_loader),
-
-                   }]
+            # analysieren 
+            analyse = analyse_cols(data_df, dataset_loader) 
+            mask = analyse.is_output_feature
+            output_features_size = analyse[mask].shape[0]        
     
+            # output_features and input_features 
+            spalten = ['col_name','feature_type','mem_usage']
+            output_features = analyse[:output_features_size][spalten]           
+            input_features = analyse[output_features_size:][spalten]        
+    
+            # Ausgabewerte berechnen
+            input_features_type  = ', '.join(pak.group_and_agg( input_features,  ['feature_type','mem_usage'], ['','sum']).sort_values('mem_usage_sum', ascending=False).feature_type)
+            output_features_type = ', '.join(pak.group_and_agg( output_features, ['feature_type','mem_usage'], ['','sum']).sort_values('mem_usage_sum', ascending=False).feature_type)        
+    
+            # Ausgabe
+            result += [{'dataset_name': dataset, 
+                        'status'      : 'ok',
+                        'rows'        : bpy.human_readable_number(data_df.shape[0]) ,
+                        'in_size'     : input_features.shape[0],                        
+                        'out_size'    : output_features.shape[0],
+       
+                        'in_name'     : ', '.join(input_features.col_name),                    
+                        'out_name'    : ', '.join(output_features.col_name),                    
+       
+                        'in_type'     : input_features_type,  # ', '.join(input_features.feature_type),                      
+                        'out_type'    : output_features_type, # ', '.join(output_features.feature_type),                    
+                                     
+                        'description' : dataset_loader.description(),
+                        'config1'     : config1(dataset_loader),
+    
+                       }]
 
+        except:
+            result += [{'dataset_name': dataset, 
+                        'status'      : 'Error load',
+                        'rows'        : 0 ,
+                        'in_size'     : 0,                        
+                        'out_size'    : 0,
+       
+                        'in_name'     : '',                    
+                        'out_name'    : '',                    
+       
+                        'in_type'     : '',                       
+                        'out_type'    : '',                    
+                                     
+                        'description' : '',  
+                        'config1'     : '',  
+    
+                       }]
+    
     result = pak.dataframe(result) 
 
-    if get_elements_to_remove:
-        return result, elements_to_remove
+    if not use_cache:
+        pak.dump_pickle(result,pickle_filename)
     return result
 
 
 
+        
+#####################################################################################################
+# train_log
+#
 
+
+def train_log(train_log_raw, T=False):
+    ''' returns small log'''
+    if train_log_raw.shape[0] > 0:
+        result = prepare_train_log(train_log_raw, size='small')
+    else:
+        zeilen = ['validation_metric','loss','roc_auc','accuracy','recall','specificity','precision','epochs','time/epoch','train_time']
+        result = pd.DataFrame(zeilen)
+        result.columns = ['name']
+    if not T:
+        return result
+        
+    result = result.set_index('name')
+    result = result.T.reset_index()
+    result = pak.rename_col(result,'index','model')
+    return result
+
+
+
+def train_log_big(train_log_raw):
+    ''' returns bigger log'''
+    return prepare_train_log(train_log_raw, size='big')        
+
+
+    
+def train_log_to_csv(train_log_raw):
+    '''
+    Saves train_log_big to csv file
+    Saves train_log_raw to csv file
+    Shows train_log (small version)
+    '''
+    t0 = train_log_raw
+    t1 = train_log_big(train_log_raw)
+    t2 = train_log(train_log_raw)
+    
+    t0.to_csv( 'train_log_raw.csv', index=False) 
+    t1.to_csv( 'train_log_big.csv', index=False)  
+    t2.to_csv( 'train_log.csv',     index=False)       
+    return t2
+
+
+
+def prepare_train_log(train_log_raw, size='small'):
+
+    # target_value ergänzen
+    mask = train_log_raw.name == 'validation_metric'  
+    validation_metrics = train_log_raw[mask]
+    
+    mask = pak.isin(train_log_raw, validation_metrics, left_on=['model_name','name'], right_on=['model_name','value'])
+    df = train_log_raw[mask].copy()
+    df['name'] = 'target_value'
+    train_log_raw = pak.add_rows(train_log_raw, df, only_new=['model_name','name','value'])
+    
+    result = pd.pivot_table( train_log_raw, 
+                              index='name',
+                              columns='model_name',
+                              values='value', 
+                              aggfunc='last')
+    result = pak.drop_multiindex(result).reset_index() 
+    
+    # Namen korrigieren
+    mask = result.name.str.startswith('average')
+    result.loc[mask,'name'] = result[mask].name.str.replace('average_','') + '_avg'   
+
+
+    # Zeilen sortieren
+    if size == 'small':
+        zeilen_vorne =  ['target_value','validation_metric','loss','accuracy','recall','specificity','precision','roc_auc',]
+        zeilen_hinten = ['epochs','time/epoch','train_time',]    
+        result = result.set_index('name').T
+        result = pak.move_cols( result, zeilen_vorne )      
+        result = pak.move_cols( result, zeilen_hinten, -1 )    
+        result = result.T.reset_index()
+
+        # Zeilen löschen
+        zeilen_verboten = []
+        zeilen_erlaubt = [z for z in ( zeilen_vorne + zeilen_hinten) if not z in zeilen_verboten ]
+        mask = result.name.isin( zeilen_erlaubt )
+        result = result[mask]
+        
+    else: # size == 'big'
+        result = result.sort_values('name')
+        zeilen_vorne =  ['target_value','validation_metric','loss',]
+        zeilen_hinten = ['experiment_name','experiment_path','output_feature_type','output_feature_name','epochs','train_secs','time/epoch','train_time',]     
+        result = result.set_index('name').T
+        result = pak.move_cols( result, zeilen_vorne )         
+        result = pak.move_cols( result, zeilen_hinten, -1 )    
+        result = result.T.reset_index()        
+
+    result = pak.reset_index(result)
+    result.columns = [c if isinstance(c,str) else 'model_' + str(c) for c in result.columns ]
+    return result
 
 
 

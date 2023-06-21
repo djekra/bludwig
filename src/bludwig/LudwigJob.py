@@ -75,7 +75,8 @@ class LudwigJob():
         self.model_paths = []
 
         # train_log
-        self.train_log_raw = pd.DataFrame()
+        self.train_log = pd.DataFrame()
+
 
         # results
         self.train_stats      = []
@@ -103,13 +104,16 @@ class LudwigJob():
 
 
     
-    def load_from_results(self):    
+    def load_from_results(self, experiment_name=None):    
         '''
         Loads data from results directory
+        * experiment_name: Only load results from this experiment. Otherwise all.
         '''
-        results_dir = os.listdir('results')
+        results_dir = sorted(os.listdir('results'))
+        if experiment_name is not None:
+            results_dir = [rd for rd in results_dir if rd.startswith(experiment_name)]
         self.output_dirs = [ 'results/' + d                for d in results_dir ]
-        self.train_jobs  = [ int(d.split('_')[1])          for d in results_dir ]
+        self.train_jobs  = [ int(d.split('_')[-2])         for d in results_dir ]
         self.model_names = [ self.experiment_name + '_' + str(j)             for j in self.train_jobs ]    
         self.model_paths = [d + '/model'                   for d in self.output_dirs]
         
@@ -224,7 +228,9 @@ class LudwigJob():
 
             # trainiere
             start_time = time.time()     
-            test_stat, train_stat, _, output_dir = self.model.experiment( dataset=dataset, experiment_name=self.model_name)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")            
+                test_stat, train_stat, _, output_dir = self.model.experiment( dataset=dataset, experiment_name=self.model_name)
             self.test_stats  += [test_stat]
             self.train_stats += [train_stat]
             self.output_dirs += [output_dir]
@@ -236,6 +242,7 @@ class LudwigJob():
             epochs            = len(train_stat.test['combined']['loss']) 
             validation_metric = self.model.config['trainer']['validation_metric']
             log = pak.dataframe([
+                [ count_runs[0], self.model_name, 'experiment_name',     self.experiment_name   ],                
                 [ count_runs[0], self.model_name, 'train_secs',          train_secs        ],
                 [ count_runs[0], self.model_name, 'train_time',          train_time        ],
                 [ count_runs[0], self.model_name, 'epochs',              epochs            ],
@@ -248,8 +255,8 @@ class LudwigJob():
             ])
             log.columns = ['run','model_name','name','value']
             log2 = analyse_test_stat( count_runs[0], self.model_name, test_stat)
-            self.train_log_raw = pak.add_rows( self.train_log_raw, log  )             
-            self.train_log_raw = pak.add_rows( self.train_log_raw, log2 ) 
+            self.train_log = pak.add_rows( self.train_log, log  )             
+            self.train_log = pak.add_rows( self.train_log, log2 ) 
             
             print('train_time:',train_time) 
             print()
@@ -274,48 +281,7 @@ class LudwigJob():
         return result        
 
 
-        
-#####################################################################################################
-# train_log
-#
 
-    def train_log(self):
-        ''' returns small log'''
-        if self.train_log_raw.shape[0] > 0:
-            result = prepare_train_log(self.train_log_raw, size='small')
-            return result
-        else:
-            zeilen = ['roc_auc','accuracy','recall','specificity','precision','loss','epochs','time/epoch','train_time']
-            result = pd.DataFrame(zeilen)
-            result.columns = ['name']
-            return result
-
-    
-    
-    def train_log_big(self):
-        ''' returns bigger log'''
-        return prepare_train_log(self.train_log_raw, size='big')        
-
-
-        
-    def train_log_to_csv(self):
-        '''
-        Saves train_log_big to csv file
-        Saves train_log_raw to csv file
-        Shows train_log (small version)
-        '''
-        self.train_log_raw.to_csv('train_log_raw.csv', index=False) 
-        
-        t = self.train_log_big()
-        if self.in_colab:
-            t.to_csv('train_log_colab.csv', index=False)
-        else:
-            if torch.cuda.is_available():
-                t.to_csv('train_log_GPU.csv', index=False)    
-            else:
-                t.to_csv('train_log_CPU.csv', index=False)
-                
-        return self.train_log()
 
 
         
@@ -332,11 +298,14 @@ class LudwigJob():
         
         # test_stats_small (verhindert Fehler)
         test_stats_small = []
-        keys_to_keep = list(self.train_log().name)
+        try:
+            keys_to_keep = set(self.train_log.name)
+        except:
+            keys_to_keep = {'accuracy','accuracy_micro','roc_auc','loss'}
         for stat in self.test_stats:
             r = {key: value  for key, value in stat[output_feature_name].items()  if key in keys_to_keep}
             r = { output_feature_name: r }    
-            test_stats_small += [r]        
+            test_stats_small += [r]    
 
         # ausgeben
         with warnings.catch_warnings():
